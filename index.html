@@ -72,7 +72,7 @@ table.pt a{color:var(--acc)}
 <div id="map"></div>
 <aside id="side">
   <h1>SAR Footprint Monitor</h1>
-  <div class="tabs"><button id="tab1" class="on">모니터링</button><button id="tab2">InSAR 페어 (NISAR)</button></div>
+  <div class="tabs"><button id="tab1" class="on">모니터링</button><button id="tab2">InSAR 페어 검색</button></div>
 
   <div id="mode1">
   <div class="sub" id="clock">—</div>
@@ -88,6 +88,11 @@ table.pt a{color:var(--acc)}
     <div class="btns"><button id="reloadCom">카탈로그 새로 수집</button></div>
     <div class="note" id="cacheNote" style="margin-top:6px"></div>
   </div>
+  <div class="grp">
+    <h2>항공 SAR (UAVSAR L-band · 최근 3년)</h2>
+    <div id="uavRows"></div>
+    <div class="btns"><button id="reloadUav">다시 조회</button></div>
+  </div>
   </div>
 
   <div id="mode2" hidden>
@@ -97,7 +102,8 @@ table.pt a{color:var(--acc)}
     <div class="note" style="margin:-2px 0 4px 84px">지도를 클릭해도 지정됩니다.</div>
     <div class="fld"><label>좌표</label><div id="m2pt" class="note">미지정</div></div>
     <div class="fld"><label>기간</label><div class="two"><input type="date" id="m2s"><input type="date" id="m2e"></div></div>
-    <div class="fld"><label for="m2prod">기준 제품</label><select id="m2prod"><option value="GSLC">GSLC (L2, 지리좌표)</option><option value="RSLC">RSLC (L1, 레이더좌표)</option></select></div>
+    <div class="fld"><label for="m2sen">센서</label><select id="m2sen"><option value="NISAR">NISAR</option><option value="UAVSAR">UAVSAR (항공, TropiSAR 등 포함)</option><option value="ALL">NISAR + UAVSAR</option></select></div>
+    <div class="fld"><label for="m2prod">NISAR 제품</label><select id="m2prod"><option value="GSLC">GSLC (L2, 지리좌표)</option><option value="RSLC">RSLC (L1, 레이더좌표)</option></select></div>
     <div class="fld"><label for="m2dt">최대 Δt</label><div class="two"><input type="number" id="m2dt" min="1" max="400" value="48"><select id="m2pm"><option value="all">Δt 이내 전체 조합</option><option value="seq">순차(n→n+1)만</option></select></div></div>
     <div class="btns"><button id="m2go" class="btn-pri">검색</button></div>
     <div class="note" id="m2st" style="margin-top:6px"></div>
@@ -135,7 +141,8 @@ table.pt a{color:var(--acc)}
     · NISAR: L1(RSLC/RIFG/RUNW/ROFF) + L2(GSLC/GCOV/GUNW/GOFF), PR(표준)·UR(긴급대응) 생산분을 모두 포함합니다.<br>
     · 상용: STAC 링크 트리 대신 S3 버킷 listing으로 item JSON을 전수 수집합니다(Umbra 루트 카탈로그의 링크 누락 대응). Capella는 collect당 1건이 되도록 SLC item만 사용합니다. Umbra의 <code>sar-data/tasks</code> 아래 STAC 없는 초기 데이터는 제외됩니다.<br>
     · 위성 위치: CelesTrak 최신 TLE를 SGP4로 전파한 계산값입니다(수 km 수준 오차). S1B는 운용 종료로 제외했습니다.<br>
-    · InSAR 페어: 같은 트랙·프레임·궤도방향·관측모드(대역폭 코드)·편파를 하나의 스택으로 묶고, 같은 시각의 PR/UR 중복은 PR을 우선합니다. 수직기선(Bperp)은 메타데이터에 없어 계산하지 않았습니다(NISAR는 궤도 tube를 좁게 유지하도록 운용). GUNW 열은 ASF에 이미 제작된 동일 날짜쌍 GUNW가 있는지 표시합니다.<br>
+    · UAVSAR: ASF의 POLSAR(취득 단위)·RPI(반복궤적 간섭쌍) 제품을 표시합니다. TropiSAR 등 2026년 캠페인도 UAVSAR 비행이라 ASF에 공개되는 대로 포함됩니다(비행 후 공개까지 수주~수개월 지연).<br>
+    · InSAR 페어: NISAR는 같은 트랙·프레임·궤도방향·관측모드(대역폭 코드)·편파를 하나의 스택으로 묶고, 같은 시각의 PR/UR 중복은 PR을 우선합니다. UAVSAR는 같은 flight line ID(같은 반복 비행 궤적)를 하나의 스택으로 묶고, RPI에만 등장하는 취득도 포함합니다. 수직기선(Bperp)은 메타데이터에 없어 계산하지 않았습니다(NISAR는 궤도 tube를 좁게 유지하도록 운용). 마지막 열은 ASF에 이미 제작된 동일 쌍 산출물(NISAR GUNW / UAVSAR RPI)이 있는지 표시합니다.<br>
     · 위치/줌은 URL hash(#lat=..&lng=..&z=..)에 저장됩니다.
   </div>
 </aside>
@@ -155,7 +162,8 @@ const SRC = {
   NL2:    {name:'NISAR L2', color:'#ff5d8f', live:true, sub:NISAR_L2},
   ICEYE:  {name:'ICEYE', color:'#3ddc97', live:false},
   UMBRA:  {name:'Umbra', color:'#b18cff', live:false},
-  CAPELLA:{name:'Capella', color:'#ff7a45', live:false}
+  CAPELLA:{name:'Capella', color:'#ff7a45', live:false},
+  UAV:    {name:'UAVSAR', color:'#00d1c1', live:false, sub:['POLSAR','RPI']}
 };
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -219,13 +227,14 @@ function rowHTML(k){
 }
 $('liveRows').innerHTML = ['S1','NL1','NL2'].map(rowHTML).join('');
 $('comRows').innerHTML = ['ICEYE','UMBRA','CAPELLA'].map(rowHTML).join('');
+$('uavRows').innerHTML = rowHTML('UAV');
 
-const levelOn = Object.fromEntries([...NISAR_L1, ...NISAR_L2].map(l => [l, true]));
+const levelOn = Object.fromEntries([...NISAR_L1, ...NISAR_L2, 'POLSAR', 'RPI'].map(l => [l, true]));
 for (const k of Object.keys(SRC)) $('cb_'+k).addEventListener('change', e => {
   groups[k].on = e.target.checked;
   if (e.target.checked) groups[k].layer.addTo(map); else map.removeLayer(groups[k].layer);
 });
-for (const l of Object.keys(levelOn)) $('lv_'+l).addEventListener('change', e => { levelOn[l] = e.target.checked; redraw(NISAR_L2.includes(l) ? 'NL2' : 'NL1'); });
+for (const l of Object.keys(levelOn)) $('lv_'+l).addEventListener('change', e => { levelOn[l] = e.target.checked; redraw(Object.keys(SRC).find(k => (SRC[k].sub || []).includes(l))); });
 
 function setStatus(k, msg, err){ const el = $('st_'+k); el.textContent = msg; el.classList.toggle('err', !!err); }
 function setProg(k, f){ $('pb_'+k).style.width = (Math.min(1, f)*100).toFixed(1) + '%'; }
@@ -602,84 +611,162 @@ async function geocode(){
     $('m2st').textContent = '';
   } catch(e){ $('m2st').textContent = '장소 검색 실패(Nominatim). 좌표로 입력하거나 지도를 클릭하세요.'; }
 }
+/* ---------- UAVSAR (메인: 최근 3년) ---------- */
+const ASF_LINK = n => 'https://search.asf.alaska.edu/#/?dataset=UAVSAR&searchType=List%20Search&searchList=' + encodeURIComponent(n);
+function parseUav(name){
+  const n = name.split('_');
+  if (n[2] && n[2].includes('-'))   // RPI: site_line_flt-dt_flt-dt_NNNNd_sNN_band_ver
+    return {kind:'RPI', site:n[0], line:n[1], a:n[2].replace('-', '_'), b:n[3].replace('-', '_'), dtd:parseInt(n[4]), band:n[6]};
+  return {kind:'POLSAR', site:n[0], line:n[1], a:`${n[2]}_${n[3]}`, band:n[5]};   // site_line_flt_dt_yymmdd_band_..
+}
+function uavRec(f){
+  const p = f.properties, ring = outerRing(f.geometry);
+  if (!ring || !p.sceneName) return null;
+  const u = parseUav(p.sceneName);
+  return {
+    id:p.sceneName, ring:compactRing(ring), level:p.processingLevel,
+    m:{plat:'UAVSAR (' + (u.band || 'L090') + ')', prod:p.processingLevel, mode:`site ${u.site} · line ${u.line}`,
+       acq:u.kind === 'RPI' ? `${(p.startTime || '').slice(0, 10)} → ${(p.stopTime || '').slice(0, 10)} (Δt ${u.dtd}일)` : p.startTime,
+       pol:[].concat(p.polarization || []).join(', '), ing:p.processingDate},
+    links:[p.url ? ['파일', p.url] : null, ['Vertex', ASF_LINK(p.sceneName)], ['UAVSAR 사이트', 'https://uavsar.jpl.nasa.gov/cgi-bin/product.pl?jobName=' + encodeURIComponent(p.sceneName)]].filter(Boolean),
+    thumb:(p.browse && p.browse[0]) || null
+  };
+}
+async function loadUav(){
+  setStatus('UAV', 'ASF 조회 중…'); setProg('UAV', 0.2);
+  try {
+    const start = new Date(Date.now() - 3*365.25*86400e3).toISOString().slice(0, 19) + 'Z';
+    const fs = await asfQuery({platform:'UAVSAR', processingLevel:'POLSAR,RPI', start});
+    data.UAV = fs.map(uavRec).filter(Boolean); redraw('UAV'); setProg('UAV', 1);
+    setStatus('UAV', `완료 · ${start.slice(0, 10)} 이후 취득 · ${new Date().toLocaleTimeString()}`);
+  } catch(e){ setStatus('UAV', '실패: ' + e.message, true); }
+}
+$('reloadUav').addEventListener('click', loadUav);
+
+/* ---------- 모드 2: InSAR 페어 검색 (NISAR / UAVSAR) ---------- */
 function parseNisar(name){
   const n = name.split('_');   // NISAR_L2_PR_GSLC_cyc_trk_dir_frm_mode_pol_..._start_end_...
   return {cfg:n[2], cycle:n[4], track:n[5], dir:n[6], frame:n[7], mode:n[8], pol:n[9]};
 }
-$('m2go').addEventListener('click', m2Search);
-async function m2Search(){
-  if (!m2pt){ $('m2st').textContent = '먼저 중심 장소를 지정하세요.'; return; }
-  const s = $('m2s').value, e = $('m2e').value;
-  if (!s || !e || s > e){ $('m2st').textContent = '기간을 확인하세요.'; return; }
-  const prod = $('m2prod').value, maxDt = Math.max(1, +$('m2dt').value || 48), seqOnly = $('m2pm').value === 'seq';
-  const common = {dataset:'NISAR', intersectsWith:`POINT(${m2pt.lon.toFixed(6)} ${m2pt.lat.toFixed(6)})`, start:s + 'T00:00:00Z', end:e + 'T23:59:59Z'};
-  $('m2st').textContent = `ASF 조회 중… (${prod} + 기존 GUNW)`; $('m2res').hidden = true; $('m2det').hidden = true;
-  let fs, gs;
-  try { [fs, gs] = await Promise.all([asfQuery({...common, processingLevel:prod}), asfQuery({...common, processingLevel:'GUNW'})]); }
-  catch(err){ $('m2st').textContent = '조회 실패: ' + err.message; return; }
-  // 기존 GUNW 색인: dir_track_frame_refYYYYMMDD_secYYYYMMDD
-  const gunw = new Map();
+function makePairs(acq, maxDt, seqOnly, existing){
+  const pairs = [];
+  for (let i = 0; i < acq.length; i++) for (let j = i + 1; j < acq.length; j++){
+    const dt = Math.round((acq[j].t - acq[i].t)/86400e3);
+    if (dt > maxDt) break;
+    if (dt < 1) continue;
+    pairs.push({ref:acq[i], sec:acq[j], dt, prod:existing(acq[i], acq[j])});
+    if (seqOnly) break;
+  }
+  return pairs;
+}
+async function nisarStacks(common, prod, maxDt, seqOnly){
+  const [fs, gs] = await Promise.all([asfQuery({...common, dataset:'NISAR', processingLevel:prod}), asfQuery({...common, dataset:'NISAR', processingLevel:'GUNW'})]);
+  const gunw = new Map();   // dir_track_frame_refYYYYMMDD_secYYYYMMDD
   for (const f of gs){
     const p = f.properties, n = (p.sceneName || '').split('_');
     if (n.length < 14) continue;
-    gunw.set(`${n[6]}_${n[5]}_${n[7]}_${n[11].slice(0, 8)}_${n[13].slice(0, 8)}`, p.url || ('https://search.asf.alaska.edu/#/?searchType=List%20Search&searchList=' + encodeURIComponent(p.sceneName)));
+    gunw.set(`${n[6]}_${n[5]}_${n[7]}_${n[11].slice(0, 8)}_${n[13].slice(0, 8)}`, p.url || ASF_LINK(p.sceneName));
   }
-  // 스택 구성 (PR/UR 중복은 PR 우선)
   const st = new Map();
   for (const f of fs){
     const p = f.properties; if (!p.sceneName) continue;
     const m = parseNisar(p.sceneName);
     const key = `${m.dir}_${m.track}_${m.frame}_${m.mode}_${m.pol}`;
-    if (!st.has(key)) st.set(key, {key, ...m, acq:new Map()});
-    const t = p.startTime.slice(0, 16);
-    const prev = st.get(key).acq.get(t);
-    if (!prev || (prev.m.cfg !== 'PR' && m.cfg === 'PR'))
-      st.get(key).acq.set(t, {name:p.sceneName, t:new Date(p.startTime), m, url:p.url, ring:outerRing(f.geometry), orbit:p.orbit});
+    if (!st.has(key)) st.set(key, {m, acq:new Map()});
+    const tk = p.startTime.slice(0, 16), prev = st.get(key).acq.get(tk);
+    if (!prev || (prev.cfg !== 'PR' && m.cfg === 'PR'))
+      st.get(key).acq.set(tk, {name:p.sceneName, t:new Date(p.startTime), id:'cycle ' + m.cycle, src:m.cfg, cfg:m.cfg, url:p.url, ring:outerRing(f.geometry)});
   }
-  m2Stacks = [...st.values()].map(x => {
-    const acq = [...x.acq.values()].sort((a, b) => a.t - b.t);
-    const pairs = [];
-    for (let i = 0; i < acq.length; i++) for (let j = i + 1; j < acq.length; j++){
-      const dt = Math.round((acq[j].t - acq[i].t)/86400e3);
-      if (dt > maxDt) break;
-      const gk = `${x.dir}_${x.track}_${x.frame}_${isoDate(acq[i].t).replace(/-/g, '')}_${isoDate(acq[j].t).replace(/-/g, '')}`;
-      pairs.push({ref:acq[i], sec:acq[j], dt, gunw:gunw.get(gk) || null});
-      if (seqOnly) break;
+  const ymd = d => isoDate(d).replace(/-/g, '');
+  return {n:fs.length, stacks:[...st.values()].map(({m, acq}) => {
+    const a = [...acq.values()].sort((x, y) => x.t - y.t);
+    return {sensor:'NISAR', title:`NISAR · ${m.dir === 'A' ? 'Ascending' : 'Descending'} · Track ${m.track} · Frame ${m.frame}`,
+      short:`NISAR ${m.dir === 'A' ? 'ASC' : 'DESC'} T${m.track} F${m.frame}`, info:`모드 ${m.mode} · ${m.pol}`, prodName:'GUNW', idLabel:'주기',
+      acq:a, pairs:makePairs(a, maxDt, seqOnly, (r, s) => gunw.get(`${m.dir}_${m.track}_${m.frame}_${ymd(r.t)}_${ymd(s.t)}`) || null)};
+  })};
+}
+async function uavStacks(common, maxDt, seqOnly){
+  const fs = await asfQuery({...common, platform:'UAVSAR', processingLevel:'POLSAR,RPI'});
+  // 같은 flight line(line ID)이 같은 반복 궤적 → 하나의 스택
+  const st = new Map(), rpi = new Map();
+  const getLine = (line, band) => { const k = `${line}_${band}`; if (!st.has(k)) st.set(k, {line, band, sites:new Set(), acq:new Map()}); return st.get(k); };
+  for (const f of fs){
+    const p = f.properties; if (!p.sceneName) continue;
+    const u = parseUav(p.sceneName), L_ = getLine(u.line, u.band); L_.sites.add(u.site);
+    const ring = outerRing(f.geometry);
+    if (u.kind === 'POLSAR'){
+      L_.acq.set(u.a, {name:p.sceneName, t:new Date(p.startTime), id:'flight ' + u.a.replace('_', '-'), src:'POLSAR', url:p.url, ring});
+    } else {
+      rpi.set(`${u.line}_${u.a}_${u.b}`, p.url || ASF_LINK(p.sceneName));
+      // RPI에만 있는 취득도 스택에 포함 (start=reference, stop=secondary)
+      for (const [k, tt] of [[u.a, p.startTime], [u.b, p.stopTime]])
+        if (!L_.acq.has(k)) L_.acq.set(k, {name:`${u.site}_${u.line}_${k}`, t:new Date(tt), id:'flight ' + k.replace('_', '-'), src:'RPI에서 확인', url:null, ring});
     }
-    return {...x, acq, pairs};
-  }).sort((a, b) => b.acq.length - a.acq.length);
+  }
+  const keyOf = a => a.id.replace('flight ', '').replace('-', '_');
+  return {n:fs.length, stacks:[...st.values()].map(x => {
+    const a = [...x.acq.values()].sort((p, q) => p.t - q.t);
+    return {sensor:'UAVSAR', title:`UAVSAR · line ${x.line} (${[...x.sites].join(', ')})`, short:`UAVSAR line ${x.line}`,
+      info:`${x.band} · heading ${String(x.line).slice(0, 3)}°`, prodName:'RPI', idLabel:'flight',
+      acq:a, pairs:makePairs(a, maxDt, seqOnly, (r, s) => rpi.get(`${x.line}_${keyOf(r)}_${keyOf(s)}`) || null)};
+  })};
+}
+$('m2sen').addEventListener('change', () => {
+  const v = $('m2sen').value;
+  $('m2prod').disabled = v === 'UAVSAR';
+  if (v !== 'NISAR' && +$('m2dt').value === 48) $('m2dt').value = 400;   // 항공 SAR은 재방문 간격이 길어 Δt 기본값 확대
+  if (v === 'NISAR' && +$('m2dt').value === 400) $('m2dt').value = 48;
+});
+$('m2go').addEventListener('click', m2Search);
+async function m2Search(){
+  if (!m2pt){ $('m2st').textContent = '먼저 중심 장소를 지정하세요.'; return; }
+  const s = $('m2s').value, e = $('m2e').value;
+  if (!s || !e || s > e){ $('m2st').textContent = '기간을 확인하세요.'; return; }
+  const sen = $('m2sen').value, prod = $('m2prod').value, maxDt = Math.max(1, +$('m2dt').value || 48), seqOnly = $('m2pm').value === 'seq';
+  const common = {intersectsWith:`POINT(${m2pt.lon.toFixed(6)} ${m2pt.lat.toFixed(6)})`, start:s + 'T00:00:00Z', end:e + 'T23:59:59Z'};
+  $('m2st').textContent = 'ASF 조회 중…'; $('m2res').hidden = true; $('m2det').hidden = true;
+  const parts = [];
+  try {
+    const jobs = [];
+    if (sen !== 'UAVSAR') jobs.push(nisarStacks(common, prod, maxDt, seqOnly).then(r => parts.push(['NISAR ' + prod, r])));
+    if (sen !== 'NISAR') jobs.push(uavStacks(common, maxDt, seqOnly).then(r => parts.push(['UAVSAR', r])));
+    await Promise.all(jobs);
+  } catch(err){ $('m2st').textContent = '조회 실패: ' + err.message; return; }
+  m2Stacks = parts.flatMap(([, r]) => r.stacks).filter(x => x.acq.length)
+    .sort((a, b) => (a.sensor === b.sensor ? 0 : a.sensor === 'NISAR' ? -1 : 1) || b.acq.length - a.acq.length);
   m2Layer.clearLayers(); if (m2Marker) m2Layer.addLayer(m2Marker);
-  if (!m2Stacks.length){ $('m2st').textContent = '해당 지점·기간에 NISAR ' + prod + ' 데이터가 없습니다.'; return; }
+  const counts = parts.map(([nm, r]) => `${nm} ${r.n}건`).join(', ');
+  if (!m2Stacks.length){ $('m2st').textContent = `해당 지점·기간에 데이터가 없습니다 (${counts}).`; return; }
   m2Stacks.forEach((x, i) => {
     x.color = STACK_COLORS[i % STACK_COLORS.length];
     x.layer = L.layerGroup(x.acq.filter(a => a.ring).map(a => L.polygon(fixRing(a.ring), {renderer, color:x.color, weight:1, fillColor:x.color, fillOpacity:0.06})
-      .bindTooltip(`${x.dir === 'A' ? 'ASC' : 'DESC'} T${x.track} F${x.frame} · ${isoDate(a.t)}`, {sticky:true}))).addTo(m2Layer);
+      .bindTooltip(`${x.short} · ${isoDate(a.t)}`, {sticky:true}))).addTo(m2Layer);
   });
-  const nP = m2Stacks.reduce((s, x) => s + x.pairs.length, 0);
-  $('m2st').textContent = `${prod} ${fs.length}건 → 스택 ${m2Stacks.length}개, 페어 ${nP}개 (Δt ≤ ${maxDt}일${seqOnly ? ', 순차' : ''})`;
+  const nP = m2Stacks.reduce((n, x) => n + x.pairs.length, 0);
+  $('m2st').textContent = `${counts} → 스택 ${m2Stacks.length}개, 페어 ${nP}개 (Δt ≤ ${maxDt}일${seqOnly ? ', 순차' : ''})`;
   $('m2stacks').innerHTML = m2Stacks.map((x, i) => {
-    const ng = x.pairs.filter(p => p.gunw).length;
+    const ng = x.pairs.filter(p => p.prod).length;
     return `<div class="stk" data-i="${i}"><span class="sw" style="background:${x.color};border-color:${x.color}"></span><div>
-      <b>${x.dir === 'A' ? 'Ascending' : 'Descending'} · Track ${esc(x.track)} · Frame ${esc(x.frame)}</b>
-      <small>모드 ${esc(x.mode)} · ${esc(x.pol)} · 취득 ${x.acq.length}회 (${isoDate(x.acq[0].t)} ~ ${isoDate(x.acq[x.acq.length-1].t)}) · 페어 ${x.pairs.length} · 기존 GUNW ${ng}</small></div></div>`;
+      <b>${esc(x.title)}</b>
+      <small>${esc(x.info)} · 취득 ${x.acq.length}회 (${isoDate(x.acq[0].t)} ~ ${isoDate(x.acq[x.acq.length-1].t)}) · 페어 ${x.pairs.length} · 기존 ${x.prodName} ${ng}</small></div></div>`;
   }).join('');
   for (const el of document.querySelectorAll('#m2stacks .stk')) el.addEventListener('click', () => selectStack(+el.dataset.i));
   $('m2res').hidden = false;
   selectStack(0);
-  const b = L.latLngBounds([]); m2Stacks.forEach(x => x.layer.eachLayer(l => b.extend(l.getBounds())));
-  if (b.isValid()) map.fitBounds(b, {padding:[30, 30]});
+  const bb = L.latLngBounds([]); m2Stacks.forEach(x => x.layer.eachLayer(l => bb.extend(l.getBounds())));
+  if (bb.isValid()) map.fitBounds(bb, {padding:[30, 30]});
 }
 function selectStack(i){
   m2Sel = i;
   m2Stacks.forEach((x, j) => x.layer.eachLayer(l => l.setStyle(j === i ? {weight:2, fillOpacity:0.15, opacity:1} : {weight:0.6, fillOpacity:0.03, opacity:0.4})));
   for (const el of document.querySelectorAll('#m2stacks .stk')) el.classList.toggle('on', +el.dataset.i === i);
   const x = m2Stacks[i];
-  $('m2dh').textContent = `페어 · ${x.dir === 'A' ? 'ASC' : 'DESC'} T${x.track} F${x.frame} (${x.pairs.length}개)`;
-  $('m2tbl').innerHTML = '<tr><th>#</th><th>Reference</th><th>Secondary</th><th class="r">Δt(일)</th><th>GUNW</th></tr>' +
+  $('m2dh').textContent = `페어 · ${x.short} (${x.pairs.length}개)`;
+  $('m2tbl').innerHTML = `<tr><th>#</th><th>Reference</th><th>Secondary</th><th class="r">Δt(일)</th><th>${x.prodName}</th></tr>` +
     x.pairs.map((p, k) => `<tr><td>${k + 1}</td><td>${isoDate(p.ref.t)}</td><td>${isoDate(p.sec.t)}</td><td class="r">${p.dt}</td>
-      <td>${p.gunw ? `<a href="${esc(p.gunw)}" target="_blank" rel="noopener">있음</a>` : '–'}</td></tr>`).join('');
-  $('m2acq').innerHTML = '<tr><th>취득일</th><th>주기</th><th>생산</th><th>장면</th></tr>' +
-    x.acq.map(a => `<tr><td>${isoDate(a.t)}</td><td>${esc(a.m.cycle)}</td><td>${esc(a.m.cfg)}</td>
+      <td>${p.prod ? `<a href="${esc(p.prod)}" target="_blank" rel="noopener">있음</a>` : '–'}</td></tr>`).join('');
+  $('m2acq').innerHTML = `<tr><th>취득일</th><th>${x.idLabel}</th><th>출처</th><th>장면</th></tr>` +
+    x.acq.map(a => `<tr><td>${isoDate(a.t)}</td><td>${esc(a.id.replace(/^(cycle|flight) /, ''))}</td><td>${esc(a.src)}</td>
       <td>${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener" title="${esc(a.name)}">다운로드</a>` : esc(a.name)}</td></tr>`).join('');
   $('m2det').hidden = false; $('m2cpst').textContent = '';
 }
@@ -688,13 +775,14 @@ async function copyText(txt){
   catch(e){ $('m2cpst').textContent = '클립보드 접근이 막혀 있습니다.'; }
 }
 $('m2cpS').addEventListener('click', () => { const x = m2Stacks[m2Sel]; if (x) copyText(x.acq.map(a => a.name).join('\n')); });
-$('m2cpP').addEventListener('click', () => { const x = m2Stacks[m2Sel]; if (x) copyText('reference,secondary,dt_days,ref_scene,sec_scene,gunw\n' +
-  x.pairs.map(p => [isoDate(p.ref.t), isoDate(p.sec.t), p.dt, p.ref.name, p.sec.name, p.gunw || ''].join(',')).join('\n')); });
+$('m2cpP').addEventListener('click', () => { const x = m2Stacks[m2Sel]; if (x) copyText(`reference,secondary,dt_days,ref_scene,sec_scene,existing_${x.prodName.toLowerCase()}\n` +
+  x.pairs.map(p => [isoDate(p.ref.t), isoDate(p.sec.t), p.dt, p.ref.name, p.sec.name, p.prod || ''].join(',')).join('\n')); });
 
 $('reloadLive').addEventListener('click', loadLive);
 $('reloadCom').addEventListener('click', () => loadCommercial(true));
 loadLive();
 loadCommercial(false);
+loadUav();
 setInterval(loadLive, 30*60e3);
 }
 </script>
